@@ -1677,16 +1677,11 @@ function parseCsv(text){
   });
 }
 
-// Orden EXACTO de columnas del Sheet UNIDADES (47 columnas)
-// IMPORTANTE: la hoja UNIDADES del Sheet debe tener sus columnas (fila 1) EXACTAMENTE
-// en este orden para que guardar/editar escriba en la columna correcta:
-// Placa|Estado|Proveedor|Centro|Detalle Centro|Ruta|Tipo de Unidad|Año Fab.|Antigüedad|
-// Carrocería|N° Asientos|N° Pasajeros|Reacondicionado|Fecha Vencimiento SOAT|Días Vencimiento SOAT|
-// Alerta SOAT|Uso SOAT|Aseguradora|Contratante|Fecha Vencimiento RTV|Días Vencimiento RTV|Vigencia|
-// Observaciones|Ambito|¿Tiene T.C.?|Fecha Vencimiento T.C.|Días Vencimiento T.C.|Ambito T.C.|
-// Propietario|Responsable|TARJ.PROPIEDAD|SOAT|REV.TEC|TARJ. CIRC.|PROGRAMA DE MANTENIMIENTO|
-// BOLETIN INF.|POLIZA RC|Cumplimiento|CARPETA
-const COLORDER_UNID = ['placa','estado','proveedor','centro','detalleCentro','categoria','tipo','anio','antiguedad','carroceria','asientos','pasajeros','reacondicionado','fechaSoat','diasSoat','estadoSoat','usoSoat','aseguradora','tipoSoat','fechaRtv','diasRtv','estadoRtv','obsRtv','modalidad','tieneTc','fechaTc','diasTc','estadoTc','propietario','responsable','docTarjProp','docSoat','docRtv','docTc','docMnto','docBoletin','docPoliza','cumpl','carpeta'];
+// Orden EXACTO y COMPLETO de las columnas del Sheet UNIDADES real (Placa → PROGRAMA DE MANTENIMIENTO2).
+// El guardado escribe por posición desde la columna A: NO reordenar esta lista.
+// Las columnas DOC.FALTA | % CUMPLI | % FALTA | CARPETA | PROV (al final del Sheet) quedan
+// fuera de esta lista a propósito — el sistema nunca las toca al guardar (se preservan tal cual).
+const COLORDER_UNID = ['placa','estado','proveedor','centro','detalleCentro','categoria','tipo','anio','antiguedad','carroceria','asientos','pasajeros','reacondicionado','fechaSoat','diasSoat','estadoSoat','usoSoat','aseguradora','tipoSoat','fechaRtv','diasRtv','alertaRtv','estadoRtv','obsRtv','modalidad','zonaInspeccion','tipoServRtv','tieneTc','fechaTc','diasTc','alertaTc','estadoTcCol','estadoTc','propietario','tieneBoletin','estadoUnidad','contratoSubarriendo','tienePolizaRc','fechaPoliza','diasPoliza','mnto','responsable','docTarjProp','docSoat','docRtv','docTc','docBoletin','docPoliza','docMnto'];
 
 // Documentos de UNIDAD (10) con su etiqueta y a qué categorías aplican
 const DOCS_UNID = [
@@ -1757,7 +1752,10 @@ function provServicioDeUnidad(u){
 
 // Orden EXACTO de columnas del Sheet CONDUCTORES (33-34 columnas)
 // La hoja CONDUCTORES del Sheet debe terminar sus columnas con: ...EMO|Cumplimiento|CARPETA|ANALISTA
-const COLORDER_COND = ['dni','conductor','estado','proveedor','placa','tipoUnidad','centro','ruta','turno','numLic','catLic','fechaLic','diasLic','estadoLic','restriccion','celular','record','cantPapeletas','puntosFirmes','puntosProceso','puntosTotal','alertaPuntos','asegSctr','tipoSctr','fechaSctr','diasSctr','estadoSctr','docDni','docLic','docRecord','docSctr','docEmo','cumpl','carpeta','analista'];
+// Orden EXACTO del Sheet CONDUCTORES real: ...Estado SCTR|EMO|CONDICION|Condición|CARPETA|PROV|ANALISTA
+// (tu Sheet no tiene columnas separadas de check DNI/Licencia/Record/SCTR — esas se calculan
+// en vivo a partir de si el dato está lleno, no se guardan aparte)
+const COLORDER_COND = ['dni','conductor','estado','proveedor','placa','tipoUnidad','centro','ruta','turno','numLic','catLic','fechaLic','diasLic','estadoLic','restriccion','celular','record','cantPapeletas','puntosFirmes','puntosProceso','puntosTotal','alertaPuntos','asegSctr','tipoSctr','fechaSctr','diasSctr','estadoSctr','emo','condicion','condicion','carpeta','proveedor','analista'];
 
 // Convierte un registro interno → array ordenado según las columnas del Sheet
 function recordToRow(rec, order){ return order.map(k => String(rec[k] ?? '')); }
@@ -1823,11 +1821,22 @@ async function syncFromSheets(){
   showToast('Sincronizando desde Google Sheets...','');
   updateGSStatus('syncing');
   try {
-    const [condRaw, unidRaw, provRaw] = await Promise.all([
+    const [condRaw, unidRaw, provDatosRaw, provDocsRaw] = await Promise.all([
       leerHoja('CONDUCTORES'),
       leerHoja('UNIDADES'),
-      leerHoja('PROVEEDORES')
+      leerHoja('DATOS PROVEEDORES'),
+      leerHoja('FILE DOCUMENTARIO PROVEEDORES')
     ]);
+    // Merge de las 2 hojas de proveedores por nombre de proveedor
+    const provRaw = (()=>{
+      const mapDatos = {}; provDatosRaw.forEach(o=>{ mapDatos[(o.proveedor||o['proveedor']||'').trim().toUpperCase()] = o; });
+      const nombres = [...new Set([...provDatosRaw.map(o=>(o.proveedor||'').trim().toUpperCase()), ...provDocsRaw.map(o=>(o.proveedor||'').trim().toUpperCase())])].filter(Boolean);
+      return nombres.map(n=>{
+        const d = mapDatos[n] || {};
+        const doc = provDocsRaw.find(o=>(o.proveedor||'').trim().toUpperCase()===n) || {};
+        return {...d, ...doc, proveedor: d.proveedor || doc.proveedor};
+      });
+    })();
 
     // ── Helper global boolDoc ──────────────────────────────────────────────────
     const boolDoc = v => {
@@ -1876,15 +1885,17 @@ async function syncFromSheets(){
         fechaSctr:     o['fecha vencimiento sctr']||'',
         diasSctr:      o['dias vencimiento sctr']||'',
         estadoSctr:    (o['estado sctr']||'').toString().toUpperCase(),
-        docDni:        boolDoc(o['dni']),
-        docLic:        boolDoc(o['licencia de conducir']),
-        docRecord:     boolDoc(o['record de conductor']),
-        docSctr:       boolDoc(o['sctr']),
-        docEmo:        boolDoc(o['emo -  examen medico ocupacional']||o['emo - examen medico ocupacional']||o['emo']),
+        emo:           o.emo||'',
+        condicion:     o.condicion||'',
+        docDni:        o.dni?'✓':'✗',
+        docLic:        (o['n° licencia de conducir']&&o['fecha de revalidacion'])?'✓':'✗',
+        docRecord:     o['record papeletas (mtc)']?'✓':'✗',
+        docSctr:       (o['aseguradora sctr']&&o['fecha vencimiento sctr'])?'✓':'✗',
+        docEmo:        boolDoc(o.emo),
         analista:      (o.analista||'').toString().trim().toUpperCase(),
         tipoServicio:  (o.analista||'').toString().trim().toUpperCase(), // alias: reusa el filtro "categoría" como filtro de Analista
         cumpl:         o.cumplimiento||'—',
-        carpeta:       o['carpeta conductor']||o.carpeta||'',
+        carpeta:       o.carpeta||'',
       }));
     }
 
@@ -1930,11 +1941,22 @@ async function syncFromSheets(){
         diasRtv:       o['días vencimiento rtv']||o['dias vencimiento rtv']||'',
         estadoRtv:     (o.vigencia||'').toString().toUpperCase(),
         obsRtv:        o.observaciones||'',
+        alertaRtv:     o['alerta rtv']||'',        // pass-through, no editable en la UI
+        zonaInspeccion:o['zona inspeccion']||'',   // pass-through
+        tipoServRtv:   o['tipo serv. rtv']||'',     // pass-through
         tieneTc:       o['¿tiene t.c.?']||'',
         fechaTc:       o['fecha vencimiento t.c.']||'',
         diasTc:        o['días vencimiento t.c.']||o['dias vencimiento t.c.']||'',
+        alertaTc:      o['alerta t.c.']||'',        // pass-through
+        estadoTcCol:   o['estado t.c.']||'',        // pass-through (columna "Estado T.C.", distinta de "Ambito T.C.")
         estadoTc:      (o['ambito t.c.']||'').toString().toUpperCase(),
         propietario:   o.propietario||'',
+        tieneBoletin:  o['tiene boletin informativo']||'', // pass-through
+        estadoUnidad:  o['estado de la unidad']||'',       // pass-through
+        contratoSubarriendo: o['contrato de subarriendo']||'', // pass-through
+        tienePolizaRc: o['cuenta con poliza rc']||'',      // pass-through
+        fechaPoliza:   o['fecha vencimiento poliza']||'',  // pass-through
+        diasPoliza:    o['dias vencimiento poliza']||'',   // pass-through
         responsable:   (o.responsable||'').toString().trim().toUpperCase(),
         tipoServicio:  (o.responsable||'').toString().trim().toUpperCase(), // alias: reusa el filtro "categoría" como filtro de Analista
         mnto:          o['programa de mantenimiento']||'',
@@ -1980,12 +2002,12 @@ async function syncFromSheets(){
         })
         .map(o=>({
           nombre:      o.proveedor||'',
-          estado:      'ACTIVO',
+          estado:      (o.estado||'').toString().trim().toUpperCase()||'ACTIVO',
           ruc:         o.ruc||'',
           contacto:    o.contacto||'',
           celular:     o.celular||'',
           correo:      o.correo||'',
-          zona:        (o.zona||'').toUpperCase(),
+          zona:        (o.norte||o.zona||'').toUpperCase(),
           tipo:        o['tipo de razon social']||'',
           actividad:   o['actividad economica principal']||'',
           responsable: (o.responsable||'').toString().trim().toUpperCase(),
@@ -1996,18 +2018,18 @@ async function syncFromSheets(){
             boolDoc(o['ficha ruc']),                                              // 1
             boolDoc(o['reporte sentinel']),                                       // 2
             boolDoc(o['referencias comercial']),                                  // 3
-            boolDoc(o['vigencia poder/dni rep. legal']||o['vigencia poder o dni del representante legal']), // 4
-            boolDoc(o['brochure/carta presentación']||o['brochure o carta de presentacion']), // 5
-            boolDoc(o['carta compromiso beta']||o['carta de compromiso beta']),   // 6
-            boolDoc(o['antecedentes']),                                           // 7
-            boolDoc(o['dj normas de seguridad']||o['declaracion jurada de normas de seguridad']), // 8
-            boolDoc(o['dj normas y políticas']||o['declaracion jurada de normas y politicas']),    // 9
+            boolDoc(o['vigencia poder o dni del representante legal']),           // 4
+            boolDoc(o['brochure o carta de presentacion']),                       // 5
+            boolDoc(o['carta de compromiso beta']),                               // 6
+            boolDoc(o['antecedentes (penales, policiales, judiciales)']||o['antecedentes']), // 7
+            boolDoc(o['delaracion jurada de normas de seguridad']),               // 8  (tal cual tu Sheet)
+            boolDoc(o['declracion juarada del proveedor normas y politicas']),    // 9  (tal cual tu Sheet)
             boolDoc(o['deuda coactiva']),                                         // 10
-            boolDoc(o['cotización']||o['cotizacion']),                            // 11
+            boolDoc(o['cotizacion']),                                             // 11
           ],
           cumpl:       o.cumplimiento||'—',
-          pctCumpl:    o['% cumplimiento']||'',
-          carpeta:     o['carpeta proveedor']||o.carpeta||'',
+          pctCumpl:    o['%']||'',
+          carpeta:     o.carpeta||'',
         }));
     }
 
