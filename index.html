@@ -1470,8 +1470,7 @@ function doGet(e) {
 // ═══════════════════════════════════════════════
 // BASE DE DATOS — desde Excel (se reemplaza con Sheets)
 // ═══════════════════════════════════════════════
-let GS_URL = 'https://script.google.com/macros/s/AKfycbyypf0N8nlLYQiMz309fsMVsbhvbUcSAwBS-RQX-4rNT1OkU9T8ttILVGmFR13zb80L/exec';
-localStorage.setItem('gs_url', GS_URL);
+let GS_URL = localStorage.getItem('gs_url_tp') || '';
 const SHEET_ID = '1Q2oWrDBmARmYZgUyIBAe0QtxbvXZijOEsaQYUa_uGEQ';
 let GS_CONNECTED = false;
 
@@ -1678,7 +1677,7 @@ function parseCsv(text){
 // El guardado escribe por posición desde la columna A: NO reordenar esta lista.
 // Las columnas DOC.FALTA | % CUMPLI | % FALTA | CARPETA | PROV (al final del Sheet) quedan
 // fuera de esta lista a propósito — el sistema nunca las toca al guardar (se preservan tal cual).
-const COLORDER_UNID = ['placa','estado','proveedor','centro','detalleCentro','categoria','tipo','anio','antiguedad','carroceria','asientos','pasajeros','reacondicionado','fechaSoat','diasSoat','estadoSoat','usoSoat','aseguradora','tipoSoat','fechaRtv','diasRtv','alertaRtv','estadoRtv','obsRtv','modalidad','zonaInspeccion','tipoServRtv','tieneTc','fechaTc','diasTc','alertaTc','estadoTcCol','estadoTc','propietario','tieneBoletin','estadoUnidad','contratoSubarriendo','tienePolizaRc','fechaPoliza','diasPoliza','mnto','responsable','docTarjProp','docSoat','docRtv','docTc','docBoletin','docPoliza','docMnto'];
+const COLORDER_UNID = ['placa','estado','proveedor','centro','detalleCentro','categoria','tipo','anio','antiguedad','carroceria','asientos','pasajeros','reacondicionado','fechaSoat','diasSoat','estadoSoat','usoSoat','aseguradora','tipoSoat','fechaRtv','diasRtv','alertaRtv','vigenciaTxt','obsRtv','modalidad','zonaInspeccion','tipoServRtv','tieneTc','fechaTc','diasTc','alertaTc','estadoTcCol','estadoTc','propietario','tieneBoletin','estadoUnidad','contratoSubarriendo','tienePolizaRc','fechaPoliza','diasPoliza','mnto','responsable','docTarjProp','docSoat','docRtv','docTc','docBoletin','docPoliza','docMnto'];
 
 // Documentos de UNIDAD (10) con su etiqueta y a qué categorías aplican
 const DOCS_UNID = [
@@ -1838,7 +1837,7 @@ async function syncFromSheets(){
     // ── Helper global boolDoc ──────────────────────────────────────────────────
     const boolDoc = v => {
       const s = String(v||'').trim().toUpperCase();
-      if(s==='TRUE'||s==='VERDADERO'||s==='1'||s==='SI'||s==='SÍ'||s==='✓'||s==='✔') return '✓';
+      if(s==='TRUE'||s==='VERDADERO'||s==='1'||s==='SI'||s==='SÍ'||s==='OK'||s==='✓'||s==='✔') return '✓';
       if(s==='NO APLICA'||s==='N/A'||s==='NA') return 'N/A';
       return '✗';
     };
@@ -1930,13 +1929,13 @@ async function syncFromSheets(){
         diasSoat:      o['días vencimiento soat']||o['dias vencimiento soat']||'',
         estadoSoat:    (o['alerta soat']||'').toString().toUpperCase(),
         usoSoat:       o['uso soat']||'',
-        tipoSeguro:    '',
         aseguradora:   o.aseguradora||'',
         tipoSoat:      o.contratante||'',
         tieneRtv:      '',
         fechaRtv:      o['fecha vencimiento rtv']||'',
         diasRtv:       o['días vencimiento rtv']||o['dias vencimiento rtv']||'',
-        estadoRtv:     (o.vigencia||'').toString().toUpperCase(),
+        estadoRtv:     (o['alerta rtv']||'').toString().toUpperCase(),
+        vigenciaTxt:   o.vigencia||'',              // pass-through, texto tipo "1 AÑO"
         obsRtv:        o.observaciones||'',
         alertaRtv:     o['alerta rtv']||'',        // pass-through, no editable en la UI
         zonaInspeccion:o['zona inspeccion']||'',   // pass-through
@@ -1964,11 +1963,8 @@ async function syncFromSheets(){
         docMnto:       boolDoc(o['programa de mantenimiento2']||o['programa de mantenimiento']),
         docBoletin:    boolDoc(o['boletin inf.']),
         docPoliza:     boolDoc(o['poliza rc']),
-        docSeguroRc:   'N/A',
-        docSeguroCarga:'N/A',
         cumpl:         o.cumplimiento||'—',
         carpeta:       o['carpeta']||o.carpeta||'',
-        tarjetaLink:   '',
       }));
     }
 
@@ -2086,7 +2082,7 @@ async function conectarGS(){
   const url=(document.getElementById('gs-url-input').value||'').trim();
   if(!url){ showToast('Ingresa la URL','err'); return; }
   GS_URL=url;
-  localStorage.setItem('gs_url',url);
+  localStorage.setItem('gs_url_tp',url);
   closeGSModal();
   await syncFromSheets();
 }
@@ -2898,7 +2894,7 @@ function renderUnidades(){
 // ═══════════════════════════════════════════════
 // PROVEEDORES TABLE CON CHECKLIST
 // ═══════════════════════════════════════════════
-const PD_KEY='prov_docs_v5';
+const PD_KEY='prov_docs_tp_v1';
 let PD=JSON.parse(localStorage.getItem(PD_KEY)||'{}');
 // 12 documentos de Transporte de Personal (etiquetas cortas para la UI)
 const DOCS_PROV=[
@@ -4227,7 +4223,6 @@ function calcularAlertasDelDia(){
         correo: prov?.correo||'',
         dias: isNaN(dias)?null:dias,
         estado: est,
-        tarjetaLink: d.tipo==='unidad' ? (u?.tarjetaLink||'') : ''
       });
     });
   });
@@ -4535,13 +4530,13 @@ function resolverUnidCond({placa, conductor, dni, provExcel, centro, modalidad, 
     unidBD = {
       placa, estado:'ACTIVO', proveedor:provCanon, centro:centro||'', modalidad:modalidad||'',
       tipoServicio:(tipoServicio||'').toUpperCase(), tipo:tipoUnidExc||'', anio:'', antiguedad:'',
-      categoria:'',marca:'',carroceria:'',asientos:'',pasajeros:'',ejes:'',ruedas:'',pesoBruto:'',pesoNeto:'',reacondicionado:'',tieneTarjProp:'',
-      fechaSoat:'',diasSoat:'',estadoSoat:'',usoSoat:'',tipoSeguro:'',aseguradora:'',tipoSoat:'',
+      categoria:'',marca:'',carroceria:'',asientos:'',pasajeros:'',reacondicionado:'',
+      fechaSoat:'',diasSoat:'',estadoSoat:'',usoSoat:'',aseguradora:'',tipoSoat:'',
       fechaRtv:'',diasRtv:'',estadoRtv:'',obsRtv:esMoto?'NO APLICA (moto)':'',
       tieneTc:esMoto?'NO APLICA':'',fechaTc:'',diasTc:'',estadoTc:'',
       propietario:'',responsable:'',
-      docTarjProp:'✗',docSoat:'✗',docRtv:'✗',docTc:'✗',docMnto:'✗',docBoletin:'✗',docPoliza:'✗',docSeguroRc:'✗',docSeguroCarga:'✗',
-      cumpl:'0/7 (0%)', carpeta:'', tarjetaLink:'', _autoCreado:true
+      docTarjProp:'✗',docSoat:'✗',docRtv:'✗',docTc:'✗',docMnto:'✗',docBoletin:'✗',docPoliza:'✗',
+      cumpl:'0/7 (0%)', carpeta:'', _autoCreado:true
     };
     UNIDADES.push(unidBD);
   }
@@ -5115,7 +5110,7 @@ function actualizarCumplCond(){
   document.getElementById('c-cumpl').value=`${ok}/${chs.length} (${Math.round(ok/chs.length*100)}%)`;
 }
 // Mapeo checkbox del form → campo interno
-const UCH_MAP={'uch-tarj':'docTarjProp','uch-soat':'docSoat','uch-rtv':'docRtv','uch-tc':'docTc','uch-mnto':'docMnto','uch-boletin':'docBoletin','uch-poliza':'docPoliza','uch-seguro-rc':'docSeguroRc','uch-seguro-carga':'docSeguroCarga'};
+const UCH_MAP={'uch-tarj':'docTarjProp','uch-soat':'docSoat','uch-rtv':'docRtv','uch-tc':'docTc','uch-mnto':'docMnto','uch-boletin':'docBoletin','uch-poliza':'docPoliza'};
 function actualizarCumplUnid(){
   const cat=document.getElementById('u-tiposervicio')?.value||'';
   const tipoV=document.getElementById('u-tipo')?.value||'';
@@ -5232,9 +5227,9 @@ function buscarUnidad(placa){
     document.getElementById('u-fecha-tc').value=u.fechaTc||'';
     const su=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v||'';};
     su('u-centro',u.centro);su('u-detalle-centro',u.detalleCentro);su('u-modalidad',u.modalidad);
-    su('u-uso-soat',u.usoSoat);su('u-tipo-seguro',u.tipoSeguro);
+    su('u-uso-soat',u.usoSoat);
     su('u-tipo-soat',u.tipoSoat);su('u-propietario',u.propietario);su('u-responsable',u.responsable);
-    su('u-carpeta',u.carpeta);su('u-tarjeta-link',u.tarjetaLink);
+    su('u-carpeta',u.carpeta);
     su('u-tiene-tc',u.tieneTc);su('u-tiene-rtv',u.tieneRtv||'SI');su('u-obs-rtv',u.obsRtv);
     if(u.anio)calcAntig();
     if(u.fechaSoat)calcDocDias('u-fecha-soat','u-dias-soat','u-est-soat');
@@ -5350,12 +5345,10 @@ async function guardarUnidad(){
     anio:gv('u-anio'),
     antiguedad:gv('u-antig'),
     marca:gv('u-marca'),
-    tarjetaLink:gv('u-tarjeta-link'),
     aseguradora:gv('u-aseg-soat'),
     fechaSoat:gv('u-fecha-soat'),
     diasSoat:(gv('u-dias-soat')||'').replace('d',''),
     usoSoat:gv('u-uso-soat'),
-    tipoSeguro:gv('u-tipo-seguro'),
     tipoSoat:gv('u-tipo-soat'),
     tieneRtv:gv('u-tiene-rtv'),
     fechaRtv:gv('u-fecha-rtv'),
@@ -5374,8 +5367,6 @@ async function guardarUnidad(){
     docMnto:document.getElementById('uch-mnto').checked?'✓':'✗',
     docBoletin:document.getElementById('uch-boletin').checked?'✓':'✗',
     docPoliza:document.getElementById('uch-poliza').checked?'✓':'✗',
-    docSeguroRc:document.getElementById('uch-seguro-rc')?.checked?'✓':'✗',
-    docSeguroCarga:document.getElementById('uch-seguro-carga')?.checked?'✓':'✗',
     tipoServicio:document.getElementById('u-tiposervicio')?.value||'',
     cumpl:document.getElementById('u-cumpl')?.value||''};
   recalcular();
@@ -6646,7 +6637,7 @@ function renderHistorial(){
 // ═══════════════════════════════════════════════
 // PERSISTENCIA DEL REPORTE ACTIVO
 // ═══════════════════════════════════════════════
-const REP_CACHE_KEY = 'rep_activo_v1';
+const REP_CACHE_KEY = 'rep_activo_tp_v1';
 
 // Guarda el reporte en localStorage + hoja REPORTE_ACTIVO de Sheets
 function guardarRepActivo(){
@@ -6756,8 +6747,8 @@ function _reconstruirRepRows(minimal, fecha){
   sincronizarReporteADB(); // por si se auto-crearon registros al restaurar, guardarlos en Sheets
 }
 
-if(!localStorage.getItem('gs_url') && GS_URL){
-  localStorage.setItem('gs_url', GS_URL);
+if(!localStorage.getItem('gs_url_tp') && GS_URL){
+  localStorage.setItem('gs_url_tp', GS_URL);
 }
 // Limpieza: ya no se usa la caché local de la base (causaba que se sobreescribiera
 // el Sheet real con datos viejos). Se borra cualquier copia vieja guardada.
