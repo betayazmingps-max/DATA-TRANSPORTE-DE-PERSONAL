@@ -1561,7 +1561,7 @@ function doGet(e) {
 // ═══════════════════════════════════════════════
 // BASE DE DATOS — desde Excel (se reemplaza con Sheets)
 // ═══════════════════════════════════════════════
-let GS_URL = localStorage.getItem('gs_url_tp') || '';
+let GS_URL = localStorage.getItem('gs_url_tp') || 'https://script.google.com/macros/s/AKfycbxBk5ebZU_AjyntqqxMm4dGbYzt5SK2064g-m4iUtanN05ntNHd9n0FXCX3mf3C4_A/exec';
 const SHEET_ID = '1Q2oWrDBmARmYZgUyIBAe0QtxbvXZijOEsaQYUa_uGEQ';
 let GS_CONNECTED = false;
 
@@ -1768,9 +1768,19 @@ function avisoPedirDoc(nombreDoc){
 }
 // Normaliza cualquier formato de fecha común (DD/MM/AAAA, AAAA/MM/DD, etc.) a AAAA-MM-DD
 function normFechaISO(v){
-  if(!v) return '';
+  if(!v && v!==0) return '';
   v=String(v).trim();
+  if(!v) return '';
   if(/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0,10);
+  // Número de serie de Google Sheets/Excel (días desde 1899-12-30) — pasa cuando la
+  // celda de la hoja está formateada como NÚMERO en vez de FECHA.
+  if(/^\d{4,6}(\.\d+)?$/.test(v)){
+    const serial=parseFloat(v);
+    if(serial>20000 && serial<80000){
+      const d=new Date(Date.UTC(1899,11,30)+Math.round(serial)*86400000);
+      return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+    }
+  }
   let m=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
   if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
   m=v.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
@@ -1858,31 +1868,50 @@ async function buscarSoatRtvCD(){
     workerFetch('consulta_citv_json',{placa}),   // json.pe, vía el Worker
   ]);
 
-  let html='';
+  const rtItems = (!rt._error && rt.success && Array.isArray(rt.data)) ? rt.data : [];
+  const rtUltima = rtItems.find(x=>x.orden==='ULTIMO') || rtItems[0]; // solo el registro ACTUAL, no el historial
+
+  // — Datos generales de la unidad: json.pe suele traer año/marca/tipo junto con la RTV —
+  let htmlDatos = '';
+  if(rtUltima){
+    const anio   = cdPick(rtUltima,'anio_fabricacion','anio','año','ano_fabricacion','year');
+    const marca  = cdPick(rtUltima,'marca','brand');
+    const modelo = cdPick(rtUltima,'modelo','model');
+    const tipoV  = cdPick(rtUltima,'tipo_vehiculo','tipo_unidad','categoria_vehicular','categoria','clase_vehiculo','clase');
+    const color  = cdPick(rtUltima,'color');
+    const anioEl=document.getElementById('u-anio');
+    if(anioEl && !anioEl.value.trim() && anio){ anioEl.value=anio; if(typeof calcAntig==='function') calcAntig(); }
+    const marcaEl=document.getElementById('u-marca');
+    if(marcaEl && !marcaEl.value.trim() && marca) marcaEl.value=marca;
+    const tipoEl=document.getElementById('u-tipo');
+    if(tipoEl && !tipoEl.value.trim() && tipoV){ tipoEl.value=tipoV; if(typeof aplicarReglasTipoUnidad==='function') aplicarReglasTipoUnidad(); }
+    const filasDatos = cdRow('Año',anio)+cdRow('Marca',marca)+cdRow('Modelo',modelo)+cdRow('Tipo',tipoV)+cdRow('Color',color);
+    if(filasDatos) htmlDatos = cdCardWrap('🚚','Datos de la Unidad','', filasDatos);
+  }
 
   // — SOAT vía ConsultaDatos —
+  let htmlSoat='';
   if(s._error||s.ok===false){
-    html += cdError('SOAT (ConsultaDatos): '+(s._error||s.error), s.http);
+    htmlSoat = cdError('SOAT (ConsultaDatos): '+(s._error||s.error), s.http);
   } else {
     const compania = cdPick(s,'nombre_compania','compania','aseguradora');
     const fechaFin = normFechaISO(cdPick(s,'fecha_fin','vigencia_hasta'));
     if(compania) setSelectFuzzy('u-aseg-soat', compania);
     if(fechaFin){ const el=document.getElementById('u-fecha-soat'); if(el){ el.value=fechaFin; calcDocDias('u-fecha-soat','u-dias-soat','u-est-soat'); } }
-    html += avisoPedirDoc('el SOAT (póliza/certificado)') + cdCardWrap('🔎🛡️','ConsultaDatos — SOAT (todos los campos)', cdEstadoBadge(s.estado), cdRenderAll(s));
+    htmlSoat = avisoPedirDoc('el SOAT (póliza/certificado)') + cdCardWrap('🔎🛡️','SOAT', cdEstadoBadge(s.estado), cdRenderAll(s));
   }
 
-  // — Revisión Técnica vía JSON.pe (backend actual, más confiable que ConsultaDatos para esto) —
-  const rtItems = (!rt._error && rt.success && Array.isArray(rt.data)) ? rt.data : [];
-  const rtUltima = rtItems.find(x=>x.orden==='ULTIMO') || rtItems[0];
+  // — Revisión Técnica vía JSON.pe: solo el registro ACTUAL (sin historial de inspecciones pasadas) —
+  let htmlRtv='';
   if(rtUltima){
     const fRtv = normFechaISO(rtUltima.vigente_hasta);
     if(fRtv){ const el=document.getElementById('u-fecha-rtv'); if(el){ el.value=fRtv; calcDocDias('u-fecha-rtv','u-dias-rtv','u-est-rtv'); } }
-    html += avisoPedirDoc('el certificado de Revisión Técnica') + cdCardWrap('✅🔧','JSON.pe — Revisión Técnica (todos los campos)', cdEstadoBadge(rtUltima.resultado_inspeccion), cdRenderAll(rtUltima));
+    htmlRtv = avisoPedirDoc('el certificado de Revisión Técnica') + cdCardWrap('✅🔧','Revisión Técnica (actual)', cdEstadoBadge(rtUltima.resultado_inspeccion), cdRenderAll(rtUltima, ['ok','http','historial','detalle','registros','tramites']));
   } else {
-    html += cdError('Revisión Técnica (JSON.pe): '+(rt._error||'no se encontró información para esta placa'));
+    htmlRtv = cdError('Revisión Técnica (JSON.pe): '+(rt._error||'no se encontró información para esta placa'));
   }
 
-  box.innerHTML = html;
+  box.innerHTML = htmlDatos + `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${htmlSoat}${htmlRtv}</div>`;
   showToast('✓ SOAT/RTV consultados y campos autocompletados','ok');
 }
 
@@ -2279,7 +2308,7 @@ async function syncFromSheets(){
         turno:         o.turno||'',
         numLic:        o['n° licencia de conducir']||'',
         catLic:        o['categoria licencia']||'',
-        fechaLic:      o['fecha de revalidacion']||'',
+        fechaLic:      normFechaISO(o['fecha de revalidacion'])||'',
         diasLic:       o['dias vencimiento lic.']||'',
         estadoLic:     (o['estado licencia']||'').toString().toUpperCase(),
         restriccion:   o['restriccion']||'',
@@ -2292,7 +2321,7 @@ async function syncFromSheets(){
         alertaPuntos:  o['alerta puntos (mtc)']||'',
         asegSctr:      o['aseguradora sctr']||'',
         tipoSctr:      o['tipo de sctr']||'',
-        fechaSctr:     o['fecha vencimiento sctr']||'',
+        fechaSctr:     normFechaISO(o['fecha vencimiento sctr'])||'',
         diasSctr:      o['dias vencimiento sctr']||'',
         estadoSctr:    (o['estado sctr']||'').toString().toUpperCase(),
         emo:           o.emo||'',
@@ -2339,14 +2368,14 @@ async function syncFromSheets(){
         pasajeros:     o['n° pasajeros']||'',
         reacondicionado: o.reacondicionado||'',
         tieneTarjProp: '',
-        fechaSoat:     o['fecha vencimiento soat']||'',
+        fechaSoat:     normFechaISO(o['fecha vencimiento soat'])||'',
         diasSoat:      o['días vencimiento soat']||o['dias vencimiento soat']||'',
         estadoSoat:    (o['alerta soat']||'').toString().toUpperCase(),
         usoSoat:       o['uso soat']||'',
         aseguradora:   o.aseguradora||'',
         tipoSoat:      o.contratante||'',
         tieneRtv:      '',
-        fechaRtv:      o['fecha vencimiento rtv']||'',
+        fechaRtv:      normFechaISO(o['fecha vencimiento rtv'])||'',
         diasRtv:       o['días vencimiento rtv']||o['dias vencimiento rtv']||'',
         estadoRtv:     (o['alerta rtv']||'').toString().toUpperCase(),
         vigenciaTxt:   o.vigencia||'',              // pass-through, texto tipo "1 AÑO"
@@ -2355,7 +2384,7 @@ async function syncFromSheets(){
         zonaInspeccion:o['zona inspeccion']||'',   // pass-through
         tipoServRtv:   o['tipo serv. rtv']||'',     // pass-through
         tieneTc:       o['¿tiene t.c.?']||'',
-        fechaTc:       o['fecha vencimiento t.c.']||'',
+        fechaTc:       normFechaISO(o['fecha vencimiento t.c.'])||'',
         diasTc:        o['días vencimiento t.c.']||o['dias vencimiento t.c.']||'',
         alertaTc:      o['alerta t.c.']||'',        // pass-through
         estadoTcCol:   o['estado t.c.']||'',        // pass-through (columna "Estado T.C.", distinta de "Ambito T.C.")
@@ -2365,7 +2394,7 @@ async function syncFromSheets(){
         estadoUnidad:  o['estado de la unidad']||'',       // pass-through
         contratoSubarriendo: o['contrato de subarriendo']||'', // pass-through
         tienePolizaRc: o['cuenta con poliza rc']||'',      // pass-through
-        fechaPoliza:   o['fecha vencimiento poliza']||'',  // pass-through
+        fechaPoliza:   normFechaISO(o['fecha vencimiento poliza'])||'',  // pass-through
         diasPoliza:    o['dias vencimiento poliza']||'',   // pass-through
         responsable:   (o.responsable||'').toString().trim().toUpperCase(),
         tipoServicio:  (o.responsable||'').toString().trim().toUpperCase(), // alias: reusa el filtro "categoría" como filtro de Analista
