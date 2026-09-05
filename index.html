@@ -1901,10 +1901,12 @@ async function buscarSoatRtvCD(){
     const fechaFin    = normFechaISO(cdPick(s,'fecha_fin','vigencia_hasta'));
     const uso         = cdPick(s,'uso','uso_soat','tipo_uso');
     const contratante = cdPick(s,'contratante','asegurado','tomador');
+    const claseVehic  = cdPick(s,'clase_vehiculo'); // confirmado: así lo trae el SOAT de ConsultaDatos
     if(compania) setSelectFuzzy('u-aseg-soat', compania);
     if(fechaFin){ const el=document.getElementById('u-fecha-soat'); if(el){ el.value=fechaFin; calcDocDias('u-fecha-soat','u-dias-soat','u-est-soat'); } }
     if(uso){ const el=document.getElementById('u-uso-soat'); if(el && !el.value.trim()) el.value=uso; }
     if(contratante){ const el=document.getElementById('u-tipo-soat'); if(el && !el.value.trim()) el.value=contratante; } // en este panel "u-tipo-soat" = Contratante
+    if(claseVehic){ const el=document.getElementById('u-tipo'); if(el && !el.value.trim()){ el.value=claseVehic; if(typeof aplicarReglasTipoUnidad==='function') aplicarReglasTipoUnidad(); } }
     htmlSoat = avisoPedirDoc('el SOAT (póliza/certificado)') + cdCardWrap('🔎🛡️','SOAT', cdEstadoBadge(s.estado), cdRenderAll(s));
   }
 
