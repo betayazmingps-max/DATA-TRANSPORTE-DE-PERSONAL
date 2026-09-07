@@ -1863,32 +1863,35 @@ async function buscarSoatRtvCD(){
   const box=document.getElementById('u-placa-cd-info');
   box.style.display='block'; box.innerHTML=cdLoading();
 
-  const [s, rt] = await Promise.all([
+  const [s, rt, veh0] = await Promise.all([
     workerFetch('consulta_soat',{placa}),        // ConsultaDatos
-    workerFetch('consulta_citv_json',{placa}),   // json.pe, vía el Worker
+    workerFetch('consulta_citv_json',{placa}),   // json.pe (revisión técnica), vía el Worker
+    workerFetch('consulta_placa_json',{placa}),  // json.pe (datos del vehículo: marca/modelo/color/motor/vin), vía el Worker
   ]);
 
-  // json.pe a veces devuelve "data" como array de inspecciones y a veces como un solo objeto
-  // (respuesta real confirmada: {success:true, data:{placa,marca,modelo,serie,color,motor,vin}})
+  // json.pe (revisión técnica) devuelve el HISTORIAL de inspecciones como array
   const rtRaw = rt && rt.data;
   const rtItems = Array.isArray(rtRaw) ? rtRaw : (rtRaw && typeof rtRaw==='object' ? [rtRaw] : []);
   const rtUltima = (!rt._error && rt.success && rtItems.length) ? (rtItems.find(x=>x.orden==='ULTIMO') || rtItems[0]) : null;
 
-  // — Datos generales de la unidad: json.pe (RTV) trae marca/modelo/color/serie/motor/vin/año;
-  // ConsultaDatos (SOAT) al menos trae la clase/tipo de vehículo. Se combinan ambas fuentes
-  // para que la tarjeta aparezca aunque una de las dos no tenga registro para esta placa.
+  // json.pe (datos del vehículo) devuelve un solo objeto: {placa,marca,modelo,serie,color,motor,vin}
+  const veh = (!veh0._error && veh0.success && veh0.data) ? veh0.data : null;
+
+  // — Datos generales de la unidad: marca/modelo/color/serie/motor/vin vienen del endpoint
+  // "datos del vehículo" de json.pe; ConsultaDatos (SOAT) aporta la clase/tipo. Se combinan
+  // para que la tarjeta aparezca aunque a alguna de las fuentes le falte esta placa.
   let htmlDatos = '';
   {
-    const anio   = rtUltima ? cdPick(rtUltima,'anio_fabricacion','anio','año','ano_fabricacion','year') : '';
-    const marca  = rtUltima ? cdPick(rtUltima,'marca','brand') : '';
-    const modelo = rtUltima ? cdPick(rtUltima,'modelo','model') : '';
-    const color  = rtUltima ? cdPick(rtUltima,'color') : '';
-    const serie  = rtUltima ? cdPick(rtUltima,'serie') : '';
-    const motor  = rtUltima ? cdPick(rtUltima,'motor') : '';
-    const vin    = rtUltima ? cdPick(rtUltima,'vin') : '';
+    const anio   = veh ? cdPick(veh,'anio_fabricacion','anio','año','ano_fabricacion','year') : '';
+    const marca  = veh ? cdPick(veh,'marca','brand') : '';
+    const modelo = veh ? cdPick(veh,'modelo','model') : '';
+    const color  = veh ? cdPick(veh,'color') : '';
+    const serie  = veh ? cdPick(veh,'serie') : '';
+    const motor  = veh ? cdPick(veh,'motor') : '';
+    const vin    = veh ? cdPick(veh,'vin') : '';
     const clase  = (!s._error && s.ok!==false) ? cdPick(s,'clase_vehiculo') : '';
 
-    if(rtUltima){
+    if(veh){
       const anioEl=document.getElementById('u-anio');
       if(anioEl && !anioEl.value.trim() && anio){ anioEl.value=anio; if(typeof calcAntig==='function') calcAntig(); }
       const marcaEl=document.getElementById('u-marca');
